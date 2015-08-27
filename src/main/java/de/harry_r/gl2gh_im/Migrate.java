@@ -31,9 +31,32 @@ public class Migrate {
 
 	public static void main(String[] args) throws IOException, JSONException,
 			ParseException {
-		welcomeDialog();
+		System.out.println("Version 0.4.0");
+		if(args.length == 7) {
+			lab_URL = args[0];
+			lab_project_id = Integer.parseInt(args[1]);
+			lab_token = args[2];
+			hub_name = args[3];
+			hub_repo = args[4];
+			hub_token = args[5];
+			time_and_name = args[6].equals("y");
+			System.out.println("args parsed");
+		}
+		else {
+			welcomeDialog();
+		}
 		JSONArray lab_issues = getLabIssues();
+		System.out.println("Number of Gitlab Issues: " + lab_issues.length());
 		for (int i = lab_issues.length()-1; i >= 0; i--) {
+			System.out.println("Issue #" + (lab_issues.length()-i));
+
+			// Wait to not hit the rate limiting:
+			try {
+				Thread.sleep(7000); // milliseconds
+			} catch(InterruptedException ex) {
+				Thread.currentThread().interrupt();
+			}
+
 			JSONObject out;
 			// createOutputJson() adds info ("migrated from Gitlab", author, creation date) to JSONObject if time_and_name == true 
 			out = createOutputJson(lab_issues.getJSONObject(i), time_and_name);
@@ -91,15 +114,16 @@ public class Migrate {
 	}
 
 	private static JSONObject performHttpPost(String url, JSONObject content)
-			throws MalformedURLException, IOException, JSONException {
+			throws IOException, JSONException {
 		// content type
 		String type = "application/json";
 		// create and open connection
-		HttpURLConnection connection = (HttpURLConnection) new URL(
-				url).openConnection();
+		HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
 		// print URL for debugging
 		System.out.println(connection);
 		// set connection parameters
+		connection.setRequestProperty("User-Agent",
+				"gl2gh_im/0.3.8 Gitlab2Github Issue Migration Tool (OpenJDK Runtime Environment build 1.8.0_51-b16)");
 		connection.setRequestProperty("Accept-Charset", charset);
 		connection.setRequestProperty("Content-Type", type);
 		connection.setRequestProperty("Content-Length",
@@ -112,7 +136,44 @@ public class Migrate {
 		// get and print http status codes
 		status = connection.getResponseCode();
 		System.out.println(status);
-		handleHttpStatusCode(status);
+		if(status >= 400) {
+			InputStream is = connection.getErrorStream();
+			// create a buffered reader and String builder
+			BufferedReader rd = new BufferedReader(new InputStreamReader(is,
+					charset));
+			StringBuilder sb = new StringBuilder();
+			// read from input stream and append to string builder
+			int k = 0;
+			while ((k = rd.read()) >= 0) {
+				sb.append((char) k);
+			}
+			System.out.println("Error: " + sb.toString());
+		}
+
+		// X-RateLimit headers
+		String limit = connection.getHeaderField("X-RateLimit-Limit");
+		if(limit != null){
+			System.out.println("Limit: " + limit);
+		}
+		else {
+			System.out.println("Limit: no");
+		}
+		String remaining = connection.getHeaderField("X-RateLimit-Remaining");
+		if(remaining != null){
+			System.out.println("Remaining: " + remaining);
+		}
+		else {
+			System.out.println("Remaining: no");
+		}
+		String reset = connection.getHeaderField("X-RateLimit-Reset");
+		if(reset != null){
+			System.out.println("Reset: " + reset);
+		}
+		else {
+			System.out.println("Reset: no");
+		}
+
+
 		// Get comments from lab an add to hub:
 		// Read returned JSON from hub (for issue number)
 		InputStream is = connection.getInputStream();
@@ -132,7 +193,7 @@ public class Migrate {
 	private static JSONArray getLabIssues() throws IOException, JSONException {
 		// open connection
 		lab_final_url = lab_URL + "/api/v3/projects/" + lab_project_id
-				+ "/issues" + "?" + "private_token=" + lab_token;
+				+ "/issues" + "?" + "private_token=" + lab_token + "&per_page=100";
 		HttpURLConnection conn = (HttpURLConnection) new URL(lab_final_url)
 				.openConnection();
 		if (conn.getResponseCode() == 200) {
@@ -250,7 +311,7 @@ public class Migrate {
 	private static void createHubCommentsonIssue(int id, JSONArray comments)
 			throws JSONException, ParseException, MalformedURLException,
 			IOException {
-		for (int i = comments.length()-1; i >= 0; i--) {
+		for (int i = 0; i < comments.length(); i++) {
 			String newcomment_string = comments.getJSONObject(i).getString(
 					"body")
 					+ "\n\n"
