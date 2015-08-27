@@ -6,7 +6,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.text.DateFormat;
 import java.text.ParseException;
@@ -20,14 +19,17 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 public class Migrate {
-	static String lab_URL, lab_token, lab_final_url, hub_url, hub_name,
-			hub_repo, hub_token, hub_final_url, author_name;
-	static String charset = "UTF-8";
+	private static String lab_URL;
+	private static String lab_token;
+	private static String hub_name;
+	private static String hub_repo;
+	private static String hub_token;
+	private static String hub_final_url;
+	private static final String charset = "UTF-8";
 
-	static int lab_project_id;
-	static int status = 0;
+	private static int lab_project_id;
 
-	static boolean time_and_name;
+	private static boolean time_and_name;
 
 	public static void main(String[] args) throws IOException, JSONException,
 			ParseException {
@@ -46,6 +48,10 @@ public class Migrate {
 			welcomeDialog();
 		}
 		JSONArray lab_issues = getLabIssues();
+		if (lab_issues == null) {
+			System.out.println("Error retrieving issues from Gitlab API");
+			System.exit(1);
+		}
 		System.out.println("Number of Gitlab Issues: " + lab_issues.length());
 		for (int i = lab_issues.length()-1; i >= 0; i--) {
 			System.out.println("Issue #" + (lab_issues.length()-i));
@@ -66,7 +72,7 @@ public class Migrate {
 				// edit issue state
 				editIssue(hub_issue_id, getState(lab_issues.getJSONObject(i)));
 				// add comments to issue
-				createHubCommentsonIssue(hub_issue_id, getLabCommentsByIssueId(getIssueId(lab_issues.getJSONObject(i))));
+				createHubCommentsOnIssue(hub_issue_id, getLabCommentsByIssueId(getIssueId(lab_issues.getJSONObject(i))));
 			} catch(Exception e) {
 				System.out.println("Error creating GitHub Issue: " + out.toString());
 				e.printStackTrace();
@@ -91,7 +97,7 @@ public class Migrate {
 		hub_name = reader.next();
 		System.out.println("Please enter your GitHub repo:");
 		hub_repo = reader.next();
-		System.out.println("Please enter your GitHub API autentication token:");
+		System.out.println("Please enter your GitHub API authentication token:");
 		hub_token = reader.next();
 		System.out
 				.println("Do you want to write originally creator's name and timestamp into the description? If not, they will be lost! (y/n)");
@@ -134,7 +140,7 @@ public class Migrate {
 		OutputStream os = connection.getOutputStream();
 		os.write(content.toString().getBytes());
 		// get and print http status codes
-		status = connection.getResponseCode();
+		int status = connection.getResponseCode();
 		System.out.println(status);
 		if(status >= 400) {
 			InputStream is = connection.getErrorStream();
@@ -143,7 +149,7 @@ public class Migrate {
 					charset));
 			StringBuilder sb = new StringBuilder();
 			// read from input stream and append to string builder
-			int k = 0;
+			int k;
 			while ((k = rd.read()) >= 0) {
 				sb.append((char) k);
 			}
@@ -182,24 +188,22 @@ public class Migrate {
 				charset));
 		StringBuilder sb = new StringBuilder();
 		// read from input stream and append to string builder
-		int k = 0;
+		int k;
 		while ((k = rd.read()) >= 0) {
 			sb.append((char) k);
 		}
-		JSONObject created_issue = new JSONObject(sb.toString());
-		return created_issue;
+		return new JSONObject(sb.toString());
 	}
 
 	private static JSONArray getLabIssues() throws IOException, JSONException {
 		// open connection
-		lab_final_url = lab_URL + "/api/v3/projects/" + lab_project_id
+		String lab_final_url = lab_URL + "/api/v3/projects/" + lab_project_id
 				+ "/issues" + "?" + "private_token=" + lab_token + "&per_page=100";
 		HttpURLConnection conn = (HttpURLConnection) new URL(lab_final_url)
 				.openConnection();
 		if (conn.getResponseCode() == 200) {
 			// open input stream
-			InputStream is = conn.getInputStream();
-			try {
+			try (InputStream is = conn.getInputStream()) {
 				// create a buffered reader and String builder
 				BufferedReader rd = new BufferedReader(new InputStreamReader(
 						is, charset));
@@ -211,12 +215,11 @@ public class Migrate {
 				}
 				// build json object from String and return
 				return new JSONArray(sb.toString());
-			} catch(Exception e) {
+			} catch (Exception e) {
 				e.printStackTrace();
 				return null;
 			} finally {
 				// close stream in case of exception
-				is.close();
 				conn.disconnect();
 				System.out.println("Connection closed!");
 			}
@@ -240,7 +243,7 @@ public class Migrate {
 			break;
 		}
 		case (201): {
-			System.out.println("Succesfully created");
+			System.out.println("Successfully created");
 			break;
 		}
 		case (400): {
@@ -252,7 +255,7 @@ public class Migrate {
 			break;
 		}
 		case (404): {
-			System.out.println("Requested recource not found!");
+			System.out.println("Requested resource not found!");
 			break;
 		}
 		default: {
@@ -299,7 +302,7 @@ public class Migrate {
 	}
 
 	private static int createIssue(JSONObject out)
-			throws MalformedURLException, IOException, JSONException, ParseException {
+			throws IOException, JSONException {
 		// create URL
 		hub_final_url = "https://api.github.com/repos/" + hub_name + "/"
 				+ hub_repo + "/issues" + "?access_token=" + hub_token;
@@ -308,9 +311,8 @@ public class Migrate {
 		return created_issue.getInt("number");
 	}
 
-	private static void createHubCommentsonIssue(int id, JSONArray comments)
-			throws JSONException, ParseException, MalformedURLException,
-			IOException {
+	private static void createHubCommentsOnIssue(int id, JSONArray comments)
+			throws JSONException, ParseException, IOException {
 		for (int i = 0; i < comments.length(); i++) {
 			String newcomment_string = comments.getJSONObject(i).getString(
 					"body")
@@ -332,13 +334,12 @@ public class Migrate {
 	}
 
 	private static JSONArray getLabCommentsByIssueId(int issue_id)
-			throws MalformedURLException, IOException, JSONException {
+			throws IOException, JSONException {
 		// open input stream
 		String lab_issues_url = lab_URL + "/api/v3/projects/" + lab_project_id
 				+ "/issues/" + issue_id + "/notes" + "?" + "private_token="
 				+ lab_token;
-		InputStream is = new URL(lab_issues_url).openStream();
-		try {
+		try (InputStream is = new URL(lab_issues_url).openStream()) {
 			// create a buffered reader and String builder
 			BufferedReader rd = new BufferedReader(new InputStreamReader(is,
 					charset));
@@ -349,11 +350,9 @@ public class Migrate {
 				sb.append((char) i);
 			}
 			// build json object from String and return
-			JSONArray json = new JSONArray(sb.toString());
-			return json;
+			return new JSONArray(sb.toString());
 		} finally {
 			// close stream in case of exception
-			is.close();
 			System.out.println("Connection closed!");
 		}
 	}
@@ -363,8 +362,7 @@ public class Migrate {
 		return in_object.getString("state");
 	}
 
-	private static void editIssue(int id, String state) throws MalformedURLException,
-			IOException, JSONException {
+	private static void editIssue(int id, String state) throws IOException, JSONException {
 		// reverse to bring the issues in right order
 		JSONObject edit_object = new JSONObject();
 		edit_object.put("state", state);
